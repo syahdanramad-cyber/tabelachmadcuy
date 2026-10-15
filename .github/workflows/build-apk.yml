@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - master
   workflow_dispatch:
 
 jobs:
@@ -15,7 +16,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -24,18 +25,73 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: '3.38.5'
 
-      - name: Check Flutter version
+      - name: Check Flutter
         run: flutter --version
 
-      - name: Generate Android project
+      - name: Generate Android configuration
         run: flutter create --platforms=android --project-name tabel_siswa .
+
+      - name: Fix Android build versions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          wrapper = Path("android/gradle/wrapper/gradle-wrapper.properties")
+          if not wrapper.exists():
+              raise SystemExit("File Gradle wrapper tidak ditemukan!")
+
+          text = wrapper.read_text()
+          text, count = re.subn(
+              r"gradle-[0-9.]+-(?:bin|all)\.zip",
+              "gradle-8.14.3-bin.zip",
+              text
+          )
+          if count == 0:
+              raise SystemExit("Versi Gradle wrapper tidak ditemukan!")
+          wrapper.write_text(text)
+
+          settings = Path("android/settings.gradle.kts")
+          if not settings.exists():
+              settings = Path("android/settings.gradle")
+          if not settings.exists():
+              raise SystemExit("File settings.gradle(.kts) tidak ditemukan!")
+
+          text = settings.read_text()
+          lines = text.splitlines()
+
+          for i, line in enumerate(lines):
+              if "com.android.application" in line and "version" in line:
+                  lines[i] = re.sub(
+                      r'version\s+["\'][^"\']+["\']',
+                      'version "8.11.1"',
+                      line
+                  )
+              elif (
+                  ("org.jetbrains.kotlin.android" in line
+                   or "kotlin-android" in line)
+                  and "version" in line
+              ):
+                  lines[i] = re.sub(
+                      r'version\s+["\'][^"\']+["\']',
+                      'version "2.2.20"',
+                      line
+                  )
+
+          settings.write_text("\n".join(lines) + "\n")
+
+          print("Gradle wrapper:", wrapper.read_text().strip().split("distributionUrl=")[-1])
+          print("Android settings diperbarui:", settings)
+          print(settings.read_text())
+          PY
 
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Build APK release
+      - name: Build release APK
         run: flutter build apk --release
 
       - name: Upload APK
